@@ -1,0 +1,98 @@
+2025-05-09T02:28:28.817Z warn: 	Neither 'domain' nor 'CMD_DOMAIN' is configured. This can cause issues with various components.
+Hint: Make sure 'protocolUseSSL' and 'urlAddPort' or 'CMD_PROTOCOL_USESSL' and 'CMD_URL_ADDPORT' are configured properly.
+2025-05-09T02:28:28.818Z warn: 	Session secret not set. Using random generated one. Please set `sessionSecret` in your config.js file. All users will be logged out.
+2025-05-09T02:28:28.989Z info: 	dmp worker process started
+2025-05-09T02:28:29.281Z info: 	Executing (default): CREATE TABLE IF NOT EXISTS `Users` (`id` UUID PRIMARY KEY, `profileid` VARCHAR(255) UNIQUE, `profile` TEXT, `history` TEXT, `accessToken` TEXT, `refreshToken` TEXT, `deleteToken` UUID, `email` TEXT, `password` TEXT, `createdAt` DATETIME NOT NULL, `updatedAt` DATETIME NOT NULL);
+2025-05-09T02:28:29.284Z info: 	Executing (default): PRAGMA INDEX_LIST(`Users`)
+2025-05-09T02:28:29.285Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Users_1`)
+2025-05-09T02:28:29.286Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Users_2`)
+(sequelize) Warning: SQLite does not support TEXT with options. Plain `TEXT` will be used instead. 
+>> Check: https://www.sqlite.org/datatype3.html
+2025-05-09T02:28:29.288Z info: 	Executing (default): CREATE TABLE IF NOT EXISTS `Notes` (`id` UUID PRIMARY KEY, `shortid` VARCHAR(255) NOT NULL UNIQUE, `alias` VARCHAR(255) UNIQUE, `permission` TEXT, `viewcount` INTEGER NOT NULL DEFAULT 0, `title` TEXT, `content` TEXT, `authorship` TEXT, `lastchangeAt` DATETIME, `savedAt` DATETIME, `createdAt` DATETIME NOT NULL, `updatedAt` DATETIME NOT NULL, `ownerId` UUID REFERENCES `Users` (`id`) ON DELETE CASCADE, `lastchangeuserId` UUID);
+2025-05-09T02:28:29.289Z info: 	Executing (default): PRAGMA INDEX_LIST(`Notes`)
+2025-05-09T02:28:29.290Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Notes_1`)
+2025-05-09T02:28:29.290Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Notes_2`)
+2025-05-09T02:28:29.290Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Notes_3`)
+2025-05-09T02:28:29.292Z info: 	Executing (default): CREATE TABLE IF NOT EXISTS `Authors` (`id` INTEGER PRIMARY KEY AUTOINCREMENT, `color` VARCHAR(255), `createdAt` DATETIME NOT NULL, `updatedAt` DATETIME NOT NULL, `noteId` UUID REFERENCES `Notes` (`id`) ON DELETE CASCADE, `userId` UUID REFERENCES `Users` (`id`) ON DELETE CASCADE);
+2025-05-09T02:28:29.292Z info: 	Executing (default): PRAGMA INDEX_LIST(`Authors`)
+2025-05-09T02:28:29.293Z info: 	Executing (default): PRAGMA INDEX_INFO(`authors_note_id_user_id`)
+2025-05-09T02:28:29.294Z info: 	Executing (default): CREATE TABLE IF NOT EXISTS `Revisions` (`id` UUID PRIMARY KEY, `patch` TEXT, `lastContent` TEXT, `content` TEXT, `length` INTEGER, `authorship` TEXT, `createdAt` DATETIME NOT NULL, `updatedAt` DATETIME NOT NULL, `noteId` UUID REFERENCES `Notes` (`id`) ON DELETE CASCADE);
+2025-05-09T02:28:29.295Z info: 	Executing (default): PRAGMA INDEX_LIST(`Revisions`)
+2025-05-09T02:28:29.295Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Revisions_1`)
+2025-05-09T02:28:29.296Z info: 	Executing (default): CREATE TABLE IF NOT EXISTS `Sessions` (`sid` VARCHAR(36) PRIMARY KEY, `expires` DATETIME, `data` TEXT, `createdAt` DATETIME NOT NULL, `updatedAt` DATETIME NOT NULL);
+2025-05-09T02:28:29.297Z info: 	Executing (default): PRAGMA INDEX_LIST(`Sessions`)
+2025-05-09T02:28:29.297Z info: 	Executing (default): PRAGMA INDEX_INFO(`sqlite_autoindex_Sessions_1`)
+2025-05-09T02:28:29.302Z info: 	Executing (default): SELECT `id`, `shortid`, `alias`, `permission`, `viewcount`, `title`, `content`, `authorship`, `lastchangeAt`, `savedAt`, `createdAt`, `updatedAt`, `ownerId`, `lastchangeuserId` FROM `Notes` AS `Note` WHERE ((`Note`.`lastchangeAt` IS NULL OR (`Note`.`lastchangeAt` IS NOT NULL AND `Note`.`lastchangeAt` > `createdAt`)) AND (`Note`.`savedAt` IS NULL OR `Note`.`savedAt` < `lastchangeAt`));
+2025-05-09T02:28:29.305Z info: 	HTTP Server listening at 0.0.0.0:3000
+2025-05-09T02:28:31.957Z info: 	Executing (default): SELECT `sid`, `expires`, `data`, `createdAt`, `updatedAt` FROM `Sessions` AS `Session` WHERE `Session`.`sid` = 'Vx_AlWfW-Ir2rIyaBdURkVBdfN7Lj4x4';
+2025-05-09T02:28:31.963Z info: 	Executing (default): INSERT INTO `Sessions` (`sid`,`expires`,`data`,`createdAt`,`updatedAt`) VALUES ($1,$2,$3,$4,$5);
+2025-05-09T02:28:31.979Z info: 	108.181.23.93 - - [09/May/2025:02:28:31 +0000] "GET / HTTP/1.1" 200 18340 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:32.607Z info: 	108.181.23.93 - - [09/May/2025:02:28:32 +0000] "GET /build/cover.css HTTP/1.1" 200 8478 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:32.609Z info: 	108.181.23.93 - - [09/May/2025:02:28:32 +0000] "GET /build/font.css HTTP/1.1" 200 182 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:33.081Z info: 	Executing (default): SELECT `sid`, `expires`, `data`, `createdAt`, `updatedAt` FROM `Sessions` AS `Session` WHERE `Session`.`sid` = 'Vx_AlWfW-Ir2rIyaBdURkVBdfN7Lj4x4';
+var __line = 1
+  , __lines = "window.domain = '<%- domain %>'\nwindow.urlpath = '<%- urlpath %>'\nwindow.debug = <%- debug %>\nwindow.version = '<%- version %>'\nwindow.plantumlServer = '<%- plantumlServer %>'\n\nwindow.allowedUploadMimeTypes = <%- JSON.stringify(allowedUploadMimeTypes) %>\n\nwindow.defaultUseHardbreak = <%- defaultUseHardbreak %>\n\nwindow.linkifyHeaderStyle = '<%- linkifyHeaderStyle %>'\n\nwindow.DROPBOX_APP_KEY = '<%- DROPBOX_APP_KEY %>'\n\nwindow.USE_CDN = <%- useCDN %>\n\nwindow.defaultTocDepth = <%- defaultTocDepth %>\n"
+  , __filename = "/root/codimd/public/js/lib/common/constant.ejs";
+try {
+  var __output = [], __append = __output.push.bind(__output);
+  with (locals || {}) {
+    ; __append("window.domain = '")
+    ; __append( domain )
+    ; __append("'\nwindow.urlpath = '")
+    ; __line = 2
+    ; __append( urlpath )
+    ; __append("'\nwindow.debug = ")
+    ; __line = 3
+    ; __append( debug )
+    ; __append("\nwindow.version = '")
+    ; __line = 4
+    ; __append( version )
+    ; __append("'\nwindow.plantumlServer = '")
+    ; __line = 5
+    ; __append( plantumlServer )
+    ; __append("'\n\nwindow.allowedUploadMimeTypes = ")
+    ; __line = 7
+    ; __append( JSON.stringify(allowedUploadMimeTypes) )
+    ; __append("\n\nwindow.defaultUseHardbreak = ")
+    ; __line = 9
+    ; __append( defaultUseHardbreak )
+    ; __append("\n\nwindow.linkifyHeaderStyle = '")
+    ; __line = 11
+    ; __append( linkifyHeaderStyle )
+    ; __append("'\n\nwindow.DROPBOX_APP_KEY = '")
+    ; __line = 13
+    ; __append( DROPBOX_APP_KEY )
+    ; __append("'\n\nwindow.USE_CDN = ")
+    ; __line = 15
+    ; __append( useCDN )
+    ; __append("\n\nwindow.defaultTocDepth = ")
+    ; __line = 17
+    ; __append( defaultTocDepth )
+    ; __append("\n")
+    ; __line = 18
+  }
+  return __output.join("");
+} catch (e) {
+  rethrow(e, __lines, __filename, __line, escapeFn);
+}
+
+2025-05-09T02:28:33.086Z info: 	Executing (default): UPDATE `Sessions` SET `expires`=$1,`updatedAt`=$2 WHERE `sid` = $3
+2025-05-09T02:28:33.093Z info: 	108.181.23.93 - - [09/May/2025:02:28:33 +0000] "GET /config HTTP/1.1" 200 460 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:33.469Z info: 	108.181.23.93 - - [09/May/2025:02:28:33 +0000] "GET /screenshot.png HTTP/1.1" 200 366447 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:33.684Z info: 	108.181.23.93 - - [09/May/2025:02:28:33 +0000] "GET /build/cover.afcdcbd16c3930c2260d.js HTTP/1.1" 200 172979 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:34.340Z info: 	Executing (default): SELECT `sid`, `expires`, `data`, `createdAt`, `updatedAt` FROM `Sessions` AS `Session` WHERE `Session`.`sid` = 'Vx_AlWfW-Ir2rIyaBdURkVBdfN7Lj4x4';
+2025-05-09T02:28:34.343Z info: 	Executing (default): UPDATE `Sessions` SET `expires`=$1,`updatedAt`=$2 WHERE `sid` = $3
+2025-05-09T02:28:34.352Z info: 	108.181.23.93 - - [09/May/2025:02:28:34 +0000] "GET /favicon.png HTTP/1.1" 200 725 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:28:34.354Z info: 	108.181.23.93 - - [09/May/2025:02:28:34 +0000] "GET /me HTTP/1.1" 401 22 "http://120.46.16.201:3000/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+
+2025-05-09T02:33:29.062Z info: 	Executing (default): SELECT `id`, `shortid`, `alias`, `permission`, `viewcount`, `title`, `content`, `authorship`, `lastchangeAt`, `savedAt`, `createdAt`, `updatedAt`, `ownerId`, `lastchangeuserId` FROM `Notes` AS `Note` WHERE ((`Note`.`lastchangeAt` IS NULL OR (`Note`.`lastchangeAt` IS NOT NULL AND `Note`.`lastchangeAt` > `createdAt`)) AND (`Note`.`savedAt` IS NULL OR `Note`.`savedAt` < `lastchangeAt`));
+2025-05-09T02:43:29.061Z info: 	Executing (default): DELETE FROM `Sessions` WHERE `expires` < '2025-05-09 02:43:29.059 +00:00'
+2025-05-09T02:58:29.060Z info: 	Executing (default): DELETE FROM `Sessions` WHERE `expires` < '2025-05-09 02:58:29.059 +00:00'
+2025-05-09T03:13:29.060Z info: 	Executing (default): DELETE FROM `Sessions` WHERE `expires` < '2025-05-09 03:13:29.060 +00:00'
