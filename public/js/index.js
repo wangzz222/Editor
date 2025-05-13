@@ -253,6 +253,8 @@ let visibleMD = false
 let visibleLG = false
 const isTouchDevice = 'ontouchstart' in document.documentElement
 let currentStatus = statusType.offline
+let isOfflineMode = false
+let offlineOperations = []
 const lastInfo = {
   needRestore: false,
   cursor: null,
@@ -375,11 +377,91 @@ function setRefreshModal (status) {
   $('#refreshModal').find('.' + status).show()
 }
 
+// 新增函数：统一管理离线模式指示器
+function updateOfflineIndicator(show) {
+  // 移除任何现有的离线指示器
+  $('.offline-edit-indicator').remove();
+  
+  // 如果需要显示，添加新的指示器
+  if (show) {
+    // 确保不重复添加，先检查是否已存在
+    if ($('.offline-edit-indicator').length === 0) {
+      const $offlineIndicator = $('<div class="offline-edit-indicator" style="position:fixed; bottom:10px; left:10px; z-index:9999; padding:5px 10px; background-color:rgba(255,165,0,0.8); border-radius:3px; color:#fff;"></div>');
+      
+      // 单独添加图标和文本，避免HTML字符串中的图标被重复解析
+      $offlineIndicator.append($('<i class="fa fa-pencil"></i>'));
+      $offlineIndicator.append(document.createTextNode(' 离线编辑模式'));
+      
+      $('body').append($offlineIndicator);
+    }
+  }
+}
+
+// 新增函数：显示临时通知
+function showTemporaryNotification(message, type = 'warning', duration = 3000) {
+  // 移除同类型的通知，避免堆积
+  $(`.alert-${type}.offline-mode-notification`).remove();
+  
+  // 创建通知元素
+  const $notification = $(`<div class="alert alert-${type} offline-mode-notification" style="position:fixed; top:60px; right:20px; z-index:9999; padding:10px 15px;"></div>`);
+  
+  // 如果消息包含HTML，使用更安全的方式添加内容
+  if (message.indexOf('<') > -1) {
+    // 消息包含HTML，拆分图标和文本
+    const iconMatch = message.match(/<i class="([^"]+)"><\/i>/);
+    if (iconMatch) {
+      // 添加图标
+      $notification.append($(`<i class="${iconMatch[1]}"></i>`));
+      
+      // 添加去除图标后的文本
+      const textOnly = message.replace(/<i class="[^"]+"><\/i>/, '');
+      $notification.append(document.createTextNode(textOnly));
+    } else {
+      // 没有找到图标模式，直接添加文本
+      $notification.text(message);
+    }
+  } else {
+    // 纯文本消息，直接设置
+    $notification.text(message);
+  }
+  
+  $('body').append($notification);
+  setTimeout(() => $notification.fadeOut(function() { $(this).remove(); }), duration);
+}
+
 function setNeedRefresh () {
   needRefresh = true
-  editor.setOption('readOnly', true)
-  socket.disconnect()
-  showStatus(statusType.offline)
+  
+  // 检查是否支持离线模式
+  if ('serviceWorker' in navigator) {
+    // 不断开socket，而是进入离线编辑模式
+    isOfflineMode = true
+    showStatus(statusType.offline)
+    
+    // 显示离线模式提醒
+    showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 已进入离线编辑模式');
+    
+    // 更新离线模式指示器
+    updateOfflineIndicator(true);
+    
+    // 保存当前文档到IndexedDB
+    const content = editor.getValue();
+    const noteId = noteid;
+    idbManager.saveNoteSnapshot(noteId, content)
+      .then(() => console.log('文档内容已保存到本地存储'))
+      .catch(err => console.error('保存文档到本地存储失败:', err));
+      
+    // 确保编辑器不是只读状态，允许离线编辑
+    if (editor.getOption('readOnly')) {
+      editor.setOption('readOnly', false);
+      console.log('已解除编辑器只读状态');
+    }
+  } else {
+    // 不支持离线模式，采用原有行为
+    editor.setOption('readOnly', true)
+    socket.disconnect()
+    showStatus(statusType.offline)
+  }
 }
 
 setloginStateChangeEvent(function () {
@@ -411,6 +493,69 @@ Visibility.change(function (e, state) {
 
 // when page ready
 $(document).ready(function () {
+  // 检查初始离线状态
+  if (!navigator.onLine) {
+    console.log('初始状态是离线，启用离线编辑模式');
+    isOfflineMode = true;
+    
+    // 更新UI显示
+    updateOfflineIndicator(true);
+    
+    // 延迟一点确保编辑器已初始化
+    setTimeout(function() {
+      if (editor.getOption('readOnly')) {
+        editor.setOption('readOnly', false);
+        console.log('已解除编辑器初始只读状态');
+      }
+    }, 1000);
+  }
+  
+  // 注册Service Worker
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/js/sw.js').then(registration => {
+        console.log('Service Worker 注册成功:', registration.scope);
+      }).catch(error => {
+        console.log('Service Worker 注册失败:', error);
+      });
+    });
+    
+    // 添加网络状态监听
+    window.addEventListener('online', () => {
+      if (isOfflineMode) {
+        console.log('网络已恢复，尝试重连...');
+        socket.connect();
+      }
+    });
+    
+    window.addEventListener('offline', () => {
+      console.log('网络已断开，进入离线模式');
+      // 触发离线模式转换
+      if (!isOfflineMode) {
+        const noteId = noteid;
+        const content = editor.getValue();
+        
+        // 保存当前状态到IndexedDB
+        idbManager.saveEditorState(noteId, content, cmClient ? cmClient.revision : -1, lastInfo)
+          .then(() => {
+            console.log('文档状态已保存到本地存储');
+            isOfflineMode = true;
+            
+            // 显示离线模式提醒
+            showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 网络断开，已进入离线编辑模式', 'warning');
+          })
+          .catch(err => console.error('保存文档到本地存储失败:', err));
+      }
+    });
+    
+    // 检查初始网络状态
+    if (!navigator.onLine) {
+      console.log('初始状态: 离线');
+      // 设置为离线模式，但不显示通知
+      isOfflineMode = true;
+    }
+  }
+  
   idle.checkAway()
   checkResponsive()
   // if in smaller screen, we don't need advanced scrollbar
@@ -470,6 +615,56 @@ $(document).ready(function () {
   $(document).on('click', '.toggle-dropdown .dropdown-menu', function (e) {
     e.stopPropagation()
   })
+
+  // 初始化离线编辑状态UI
+  if (isOfflineMode) {
+    // 使用统一的函数添加离线指示器
+    updateOfflineIndicator(true);
+  }
+  
+  // 注册Service Worker
+  if ('serviceWorker' in navigator) {
+    // ... 现有代码
+
+    // 向Service Worker发送缓存笔记请求
+    function cacheCurrentNote() {
+      if (navigator.serviceWorker.controller) {
+        const content = editor.getValue();
+        navigator.serviceWorker.controller.postMessage({
+          type: 'CACHE_NOTE',
+          noteId: noteid,
+          content: content
+        });
+      }
+    }
+    
+    // 定期缓存当前笔记
+    if (isOfflineMode) {
+      // 立即缓存
+      setTimeout(cacheCurrentNote, 2000);
+      
+      // 定期缓存
+      setInterval(cacheCurrentNote, 60000);
+    }
+    
+    // 监听Service Worker消息
+    navigator.serviceWorker.addEventListener('message', function(event) {
+      if (event.data && event.data.type === 'TRY_SYNC_OPERATIONS') {
+        if (isOfflineMode) {
+          console.log('收到同步请求，但当前处于离线模式');
+        } else if (event.data.noteId === noteid) {
+          console.log('收到同步请求，尝试同步');
+          syncOfflineChanges().catch(err => {
+            console.error('同步失败:', err);
+          });
+        }
+      } else if (event.data && event.data.type === 'NOTE_CACHED') {
+        console.log('笔记已缓存:', event.data.noteId);
+      }
+    });
+  }
+  
+  // ... 现有代码
 })
 // when page resize
 $(window).resize(function () {
@@ -723,8 +918,29 @@ function showStatus (type, num) {
     case statusType.online:
       ui.toolbar.statusShortMsg.text(num)
       ui.toolbar.statusOnline.show()
+      // 确保在切换到在线状态时移除离线编辑指示器
+      updateOfflineIndicator(false)
       break
     case statusType.offline:
+      // // 完全重新构建离线状态显示，避免图标重复
+      // const $statusOffline = ui.toolbar.statusOffline
+      
+      // // 使用text()方法设置文本，而不是html()或append()，防止生成多余图标
+      // // 首先清空内容，确保没有残留的元素
+      // $statusOffline.empty()
+      
+      // // 添加单个图标
+      // $statusOffline.append($('<i class="fa fa-plug"></i>'))
+      
+      // // 添加适当的文本作为纯文本（避免使用append追加文本，这可能导致问题）
+      // if (isOfflineMode) {
+      //   $statusOffline.append(document.createTextNode(' 离线编辑模式'))
+      // } else {
+      //   $statusOffline.append(document.createTextNode(' ' + __('OFFLINE')))
+      // }
+      
+      // // 显示状态
+      // $statusOffline.show()
       ui.toolbar.statusOffline.show()
       break
   }
@@ -1797,19 +2013,177 @@ socket.on('maintenance', function () {
   cmClient.revision = -1
 })
 socket.on('disconnect', function (data) {
-  showStatus(statusType.offline)
-  if (window.loaded) {
-    saveInfo()
-    lastInfo.history = editor.getHistory()
+  console.log('断开连接，进入离线模式');
+  
+  // 1. 首先确保设置离线模式状态
+  isOfflineMode = true;
+  
+  // 2. 立即解除编辑器只读状态，确保用户可以继续编辑
+  // 无论后续操作是否成功，都先确保编辑器可用
+  if (editor.getOption('readOnly')) {
+    console.log('解除编辑器只读状态');
+    editor.setOption('readOnly', false);
   }
-  if (!editor.getOption('readOnly')) { editor.setOption('readOnly', true) }
+  
+  // 3. 更新UI状态
+  showStatus(statusType.offline);
+  
+  // 4. 显示离线编辑状态指示器
+  updateOfflineIndicator(true);
+  
+  // 5. 保存当前状态
+  if (window.loaded) {
+    saveInfo();
+    lastInfo.history = editor.getHistory();
+    
+    // 检查是否支持离线模式
+    if ('serviceWorker' in navigator) {
+      // 保存当前文档到IndexedDB
+      const content = editor.getValue();
+      const noteId = noteid;
+      
+      // 即使保存失败也不影响编辑
+      idbManager.saveEditorState(noteId, content, cmClient ? cmClient.revision : -1, lastInfo)
+        .then(() => {
+          console.log('文档状态已保存到本地存储');
+          
+          // 显示离线模式提醒
+          showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 网络断开，已进入离线编辑模式');
+          
+          // 向Service Worker缓存当前内容
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+              type: 'CACHE_NOTE',
+              noteId: noteId,
+              content: content
+            });
+          }
+        })
+        .catch(err => {
+          console.error('保存文档到本地存储失败:', err);
+          // 即使保存失败，也显示离线模式通知
+          showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 网络断开，进入离线编辑模式（本地存储失败）', 'warning');
+        });
+    }
+  } else {
+    // 未加载完成，尝试从IndexedDB恢复内容
+    idbManager.getNoteSnapshot(noteid)
+      .then(snapshot => {
+        if (snapshot) {
+          console.log('从本地存储恢复笔记内容');
+          
+          // 设置内容
+          editor.setValue(snapshot.content);
+          
+          // 恢复历史记录和状态
+          if (snapshot.metadata && snapshot.metadata.lastInfo) {
+            // 不能直接赋值给lastInfo（常量），而是复制其属性
+            if (snapshot.metadata.lastInfo.history) {
+              editor.setHistory(snapshot.metadata.lastInfo.history);
+            }
+            
+            // 复制其他属性
+            for (const key in snapshot.metadata.lastInfo) {
+              if (key !== 'history' && Object.prototype.hasOwnProperty.call(snapshot.metadata.lastInfo, key)) {
+                lastInfo[key] = snapshot.metadata.lastInfo[key];
+              }
+            }
+          }
+          
+          // 显示离线模式通知
+          showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 已从本地存储加载笔记', 'info', 5000);
+          
+          // 标记为已加载
+          window.loaded = true;
+          ui.spinner.hide();
+          ui.content.fadeIn();
+        }
+      })
+      .catch(err => {
+        console.error('恢复离线内容失败:', err);
+        // 即使恢复失败，仍保持离线编辑模式
+        showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 恢复本地内容失败，但您仍可编辑', 'danger', 5000);
+      });
+  }
+  
+  // 6. 设置重连定时器
   if (!retryTimer) {
     retryTimer = setInterval(function () {
-      if (!needRefresh) socket.connect()
-    }, 1000)
+      if (!needRefresh) socket.connect();
+    }, 1000);
   }
 })
 socket.on('reconnect', function (data) {
+  clearInterval(retryTimer)
+  retryTimer = null
+  
+  console.log('socket重新连接成功');
+  
+  // 从离线模式恢复
+  if (isOfflineMode) {
+    // 显示正在同步的通知
+    showTemporaryNotification('<i class="fa fa-sync fa-spin"></i> 网络已恢复，正在同步更改...', 'info');
+    
+    // 更改在线状态显示
+    showStatus(statusType.connected);
+    
+    // 更新用户状态
+    emitUserStatus(true);
+    
+    // 确保服务器知道我们在线
+    socket.emit('online users');
+    
+    // 同步离线编辑的内容
+    syncOfflineChanges().then(() => {
+      console.log('离线更改同步成功');
+      
+      // 再次强制刷新确保同步成功
+      return forceRefreshDocument();
+    }).then(() => {
+      // 同步完成，更新通知
+      showTemporaryNotification('<i class="fa fa-check"></i> 所有更改已同步', 'success');
+      
+      // 确保显示为在线状态
+      showStatus(statusType.online, onlineUsers.length);
+      
+      // 同步成功后，移除离线编辑状态指示器
+      updateOfflineIndicator(false);
+      
+      // 重置离线状态
+      isOfflineMode = false;
+      
+      // 重置离线操作队列
+      offlineOperations = [];
+      
+      // 清除IndexedDB中的离线操作
+      idbManager.clearPendingOperations(noteid)
+        .then(() => console.log('清除了离线操作缓存'))
+        .catch(err => console.warn('清除离线操作失败:', err));
+    }).catch(err => {
+      console.error('同步离线更改失败:', err);
+      
+      // 即使同步失败，也要继续正常操作
+      showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 同步部分更改失败，但您可以继续编辑', 'warning');
+      
+      // 确保显示为在线状态
+      showStatus(statusType.online, onlineUsers.length);
+      
+      // 移除离线指示器
+      updateOfflineIndicator(false);
+      
+      // 恢复正常状态
+      isOfflineMode = false;
+      
+      // 确保可以继续编辑
+      if (editor.getOption('readOnly')) {
+        editor.setOption('readOnly', false);
+      }
+    });
+  } else {
+    // 确保显示为在线状态
+    showStatus(statusType.online, onlineUsers.length);
+  }
+  
   // sync back any change in offline
   emitUserStatus(true)
   cursorActivity(editor)
@@ -2114,6 +2488,12 @@ var cmClient = null
 var synchronized_ = null
 
 function havePendingOperation () {
+  // 离线模式下，允许继续编辑，不报告有等待操作
+  if (isOfflineMode) {
+    return false;
+  }
+  
+  // 原始代码逻辑
   return !!((cmClient && cmClient.state && Object.hasOwnProperty.call(cmClient.state, 'outstanding')))
 }
 
@@ -2604,7 +2984,9 @@ editorInstance.on('beforeChange', function (cm, change) {
   }
   var isIgnoreEmitEvent = (ignoreEmitEvents.indexOf(change.origin) !== -1)
   if (!isIgnoreEmitEvent) {
-    if (!havePermission()) {
+    // 修改：添加离线模式检查，如果是离线模式始终允许编辑
+    if (!isOfflineMode && !havePermission()) {
+      console.log('取消编辑：没有权限且不是离线模式');
       change.canceled = true
       switch (permission) {
         case 'editable':
@@ -2622,7 +3004,11 @@ editorInstance.on('beforeChange', function (cm, change) {
       updateTitleReminder()
     }
   }
-  if (cmClient && !socket.connected) { cmClient.editorAdapter.ignoreNextChange = true }
+  
+  // 修改：离线模式下不需要忽略下一次改变
+  if (cmClient && !socket.connected && !isOfflineMode) { 
+    cmClient.editorAdapter.ignoreNextChange = true 
+  }
 })
 editorInstance.on('cut', function () {
   // na
@@ -2634,6 +3020,35 @@ editorInstance.on('changes', function (editor, changes) {
   const docHeightChanged = editor.doc.height !== lastDocHeight
   updateHistory()
   var docLength = editor.getValue().length
+  
+  // 在离线模式下记录操作
+  if (isOfflineMode) {
+    // 记录更改到IndexedDB
+    for (let i = 0; i < changes.length; i++) {
+      const change = changes[i];
+      // 忽略setValue和ignoreHistory触发的变更
+      if (ignoreEmitEvents.indexOf(change.origin) !== -1) continue;
+      
+      // 记录操作
+      const operation = {
+        from: change.from,
+        to: change.to,
+        text: change.text,
+        removed: change.removed,
+        origin: change.origin,
+        timestamp: Date.now()
+      };
+      
+      // 添加到本地操作队列
+      offlineOperations.push(operation);
+      
+      // 保存到IndexedDB
+      idbManager.queueOperation(noteid, operation)
+        .then(() => console.log('操作已保存到队列'))
+        .catch(err => console.error('保存操作到队列失败:', err));
+    }
+  }
+  
   // workaround for big documents
   var newViewportMargin = 20
   if (docLength > 20000) {
@@ -3520,3 +3935,317 @@ ui.toolbar.extra.saveRevision.click(function (e) {
     }
   })
 })
+
+// 导入IDBManager类
+import IDBManager from './lib/idb-manager.js'
+// 创建IDB管理器实例
+const idbManager = new IDBManager()
+
+// 添加同步离线更改的函数
+async function syncOfflineChanges() {
+  try {
+    // 获取当前笔记的最新内容
+    const noteSnapshot = await idbManager.getNoteSnapshot(noteid);
+    if (!noteSnapshot) {
+      console.log('没有找到离线笔记内容');
+      return;
+    }
+    
+    // 获取待处理的操作队列
+    const pendingOps = await idbManager.getPendingOperations(noteid);
+    
+    // 获取当前文档内容（以当前编辑器内容为准）
+    const currentContent = editor.getValue();
+    
+    // 暂时禁用编辑，防止用户在同步时继续编辑
+    editor.setOption('readOnly', true);
+    
+    try {
+      if (pendingOps && pendingOps.length > 0) {
+        console.log(`发现${pendingOps.length}个离线操作待同步`);
+        
+        // 首先尝试通过socket的方式同步
+        try {
+          console.log('尝试通过socket同步内容...');
+          
+          // 首先请求完整文档刷新
+          await new Promise((resolve) => {
+            // 请求刷新，获取当前服务器文档
+            socket.emit('refresh');
+            
+            // 给服务器一点时间响应
+            setTimeout(resolve, 1000);
+          });
+          
+          if (cmClient) {
+            // 重置客户端状态
+            cmClient.serverReconnect();
+          }
+          
+          // 等待一点时间让文档同步
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // 然后直接通过socket发送内容
+          await new Promise((resolve, reject) => {
+            let timeout = setTimeout(() => {
+              // 超时不是致命错误，继续执行
+              console.warn('等待socket响应超时，继续执行');
+              resolve();
+            }, 5000);
+            
+            // 监听服务器确认
+            const ackHandler = function() {
+              console.log('服务器已确认收到内容更新');
+              clearTimeout(timeout);
+              socket.off('ack', ackHandler);
+              resolve();
+            };
+            
+            socket.on('ack', ackHandler);
+            
+            // 使用socket.io直接发送内容替换操作
+            socket.emit('operation', {
+              op: [
+                {p: 0, d: editor.getValue().length}, // 删除所有内容
+                {p: 0, i: currentContent}            // 插入新内容
+              ]
+            });
+            
+            console.log('已发送完整内容更新');
+          });
+          
+          console.log('Socket同步完成');
+        } catch (socketError) {
+          console.error('Socket同步失败:', socketError);
+          
+          // 如果socket方法失败，尝试备用方法
+          console.log('尝试备用方法同步...');
+          
+          // 直接使用socket.emit('doc')请求新文档
+          await new Promise((resolve) => {
+            socket.emit('refresh');
+            console.log('已请求文档刷新');
+            setTimeout(resolve, 2000);
+          });
+          
+          // 等待更新后，直接执行编辑器内容替换
+          editor.setValue(currentContent);
+          editor.clearHistory();
+          
+          // 设置更改来源为ignoreHistory以避免触发额外操作
+          if (cmClient) {
+            cmClient.editorAdapter.ignoreNextChange = true;
+          }
+          
+          console.log('已通过直接替换方式更新内容');
+        }
+        
+        // 将离线操作标记为已同步
+        await idbManager.clearPendingOperations(noteid);
+        
+        // 再次请求服务器刷新
+        socket.emit('refresh');
+        
+      } else {
+        console.log('没有离线操作需要同步');
+        
+        // 恢复链接状态但没有新操作，检查服务器内容与本地内容是否一致
+        // 如果编辑器内容与上次保存到服务器的内容不同，也应该同步
+        if (noteSnapshot.metadata && noteSnapshot.metadata.serverContent !== currentContent) {
+          console.log('本地内容与服务器内容不同，同步更新');
+          
+          if (cmClient) {
+            // 重置客户端状态
+            cmClient.serverReconnect();
+            
+            // 要求服务器刷新，获取最新版本
+            socket.emit('refresh');
+          }
+        }
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('同步过程中发生错误:', err);
+      // 即使同步失败，也尝试恢复正常状态
+      socket.emit('refresh');
+      throw err;
+    } finally {
+      // 完成后重新启用编辑
+      editor.setOption('readOnly', false);
+    }
+  } catch (err) {
+    console.error('同步离线更改时出错:', err);
+    // 确保编辑器可用
+    editor.setOption('readOnly', false);
+    throw err;
+  }
+}
+
+// 添加网络状态监听器，确保在任何情况下网络离线时都设置离线模式
+window.addEventListener('offline', function() {
+  console.log('网络已离线，确保离线编辑模式');
+  
+  // 设置离线模式
+  isOfflineMode = true;
+  
+  // 确保编辑器可编辑
+  if (editor.getOption('readOnly')) {
+    editor.setOption('readOnly', false);
+    console.log('已解除编辑器只读状态');
+  }
+  
+  // 显示离线状态
+  showStatus(statusType.offline);
+  
+  // 更新离线指示器
+  updateOfflineIndicator(true);
+  
+  // 显示通知
+  showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 网络已断开，进入离线编辑模式', 'warning');
+  
+  // 保存当前状态到IndexedDB
+  const content = editor.getValue();
+  if (noteid && content) {
+    idbManager.saveNoteSnapshot(noteid, content)
+      .then(() => console.log('离线状态已保存笔记内容'))
+      .catch(err => console.error('保存笔记失败:', err));
+  }
+});
+
+// 添加网络online事件的处理
+window.addEventListener('online', function() {
+  console.log('网络已恢复');
+  
+  // 如果当前是离线编辑模式，尝试自动重连
+  if (isOfflineMode) {
+    // 显示正在连接的状态
+    showStatus(statusType.connected);
+    
+    // 显示通知
+    showTemporaryNotification('<i class="fa fa-wifi"></i> 网络已恢复，正在重新连接...', 'info');
+    
+    // 如果socket已断开，尝试重连
+    if (!socket.connected) {
+      socket.connect();
+    }
+    
+    // 添加定时器检查连接状态
+    setTimeout(function() {
+      if (socket.connected) {
+        console.log('成功重新连接到服务器');
+        
+        // 更新UI状态
+        showStatus(statusType.online, onlineUsers.length);
+        
+        // 同步离线更改
+        syncOfflineChanges().then(() => {
+          // 再次强制刷新确保同步成功
+          return forceRefreshDocument();
+        }).then(() => {
+          // 同步完成
+          showTemporaryNotification('<i class="fa fa-check"></i> 所有更改已同步', 'success');
+          
+          // 更新为非离线模式
+          isOfflineMode = false;
+          
+          // 移除离线指示器
+          updateOfflineIndicator(false);
+        }).catch(err => {
+          console.error('同步离线更改失败:', err);
+          
+          // 即使同步失败，也要继续正常操作
+          showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 同步部分更改失败，但您可以继续编辑', 'warning');
+          
+          // 确保显示为在线状态
+          showStatus(statusType.online, onlineUsers.length);
+          
+          // 移除离线指示器
+          updateOfflineIndicator(false);
+          
+          // 恢复正常状态
+          isOfflineMode = false;
+          
+          // 确保可以继续编辑
+          if (editor.getOption('readOnly')) {
+            editor.setOption('readOnly', false);
+          }
+        });
+      }
+    }, 2000);
+  }
+});
+
+// 在文档加载完成时运行
+$(document).ready(function() {
+  // ... 现有代码
+})
+
+// 添加调试函数，可以在console直接调用启用离线编辑
+window.forceOfflineEditing = function() {
+  console.log('强制启用离线编辑模式');
+  
+  // 设置离线模式
+  isOfflineMode = true;
+  
+  // 确保编辑器可编辑
+  if (editor.getOption('readOnly')) {
+    editor.setOption('readOnly', false);
+    console.log('已解除编辑器只读状态');
+  }
+  
+  // 显示离线状态
+  showStatus(statusType.offline);
+  
+  // 更新离线指示器
+  updateOfflineIndicator(true);
+  
+  // 显示通知
+  showTemporaryNotification('<i class="fa fa-exclamation-triangle"></i> 已强制启用离线编辑模式', 'warning');
+  
+  return "离线编辑模式已启用";
+};
+
+// 可调用此函数检查当前离线状态
+window.checkOfflineStatus = function() {
+  console.log({
+    isOfflineMode: isOfflineMode,
+    editorReadOnly: editor.getOption('readOnly'),
+    networkOnline: navigator.onLine,
+    socketConnected: socket.connected
+  });
+  
+  return {
+    isOfflineMode: isOfflineMode,
+    editorReadOnly: editor.getOption('readOnly'),
+    networkOnline: navigator.onLine,
+    socketConnected: socket.connected
+  };
+};
+
+// 添加一个强制刷新文档的函数
+function forceRefreshDocument() {
+  return new Promise((resolve, reject) => {
+    console.log('请求文档强制刷新...');
+    
+    // 设置超时保护
+    const timeout = setTimeout(() => {
+      console.warn('文档刷新超时');
+      resolve(false);
+    }, 5000);
+    
+    // 临时事件处理器
+    const docHandler = function(doc) {
+      console.log('接收到文档更新');
+      clearTimeout(timeout);
+      socket.off('doc', docHandler);
+      resolve(true);
+    };
+    
+    // 监听doc事件
+    socket.on('doc', docHandler);
+    
+    // 发送refresh请求
+    socket.emit('refresh');
+  });
+}
